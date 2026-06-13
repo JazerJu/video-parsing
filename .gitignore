@@ -1,0 +1,19 @@
+# llama.cpp shared libraries (download separately, see README)
+bin/libggml*.so*
+bin/libllama.so*
+# Keep: bin/libllama_wrap.so, bin/llama_wrap.c
+
+# Model files (mount or download at runtime)
+models/*.gguf
+onnx/
+
+# Runtime data
+db/
+output/
+*.pyc
+__pycache__/
+.env
+
+# OS files
+.DS_Store
+Thumbs.db

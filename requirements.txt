@@ -1,0 +1,5 @@
+numpy>=1.24
+Pillow>=10.0
+onnxruntime-gpu>=1.17
+tokenizers>=0.15
+av>=12.0
