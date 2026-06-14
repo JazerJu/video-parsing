@@ -194,6 +194,7 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
     terminal_clips = {}
     clip_captions = {}
     clip_mid_frames = {}
+    clip_all_frames = {}
     clip_layouts = {}
     cached_vision_bbox = None
 
@@ -256,7 +257,8 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
 
         clip_layouts[clip_idx] = layout
         clip_mid_frames[clip_idx] = content_frames[len(content_frames) // 2]
-        del frames, content_frames
+        clip_all_frames[clip_idx] = content_frames
+        del frames  # raw frames discarded; content_frames kept for terminal/code stitching
 
         if clip_idx % 50 == 0:
             m, s = divmod(int(start_sec), 60)
@@ -355,36 +357,22 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
                     break
     print(f"  unique code snapshots: {len(code_snapshots)}")
 
-    # 8. Terminal outputs — 拼接多帧后 GLM-OCR（需重开视频流取全帧）
+    # 8. Terminal outputs — 复用 Phase 1 全帧拼接后 GLM-OCR
     print("\n提取终端输出...")
     terminal_outputs = []
-    if terminal_clips:
-        c2 = av.open(video_path)
-        stream2 = c2.streams.video[0]
-        time_base2 = float(stream2.time_base)
-        from frame_stitcher import deduplicate_frames, stitch_scrolling_frames
-        for clip_idx in sorted(terminal_clips.keys()):
-            start_sec = clip_idx * clip_secs
-            end_sec = start_sec + clip_secs
-            c2.seek(int(start_sec / time_base2), stream=stream2)
-            clip_frames = []
-            for frame in c2.decode(stream2):
-                pts = float(frame.pts * time_base2) if frame.pts is not None else 0
-                if pts > end_sec + 1:
-                    break
-                clip_frames.append(frame.to_image().convert("RGB"))
-                if len(clip_frames) >= frames_per_clip:
-                    break
-            if not clip_frames:
-                continue
-            try:
-                deduped = deduplicate_frames(clip_frames)
-                stitched = stitch_scrolling_frames(deduped)
-                text = call_glm_ocr(stitched, "Text Recognition:", max_tokens=1024)
-            except Exception:
-                mid = clip_frames[len(clip_frames) // 2]
-                text = call_glm_ocr(mid, "Text Recognition:", max_tokens=1024)
-            if text and len(text) > 20:
+    from frame_stitcher import deduplicate_frames, stitch_scrolling_frames
+    for clip_idx in sorted(terminal_clips.keys()):
+        clip_frames = clip_all_frames.get(clip_idx, [])
+        if not clip_frames:
+            continue
+        try:
+            deduped = deduplicate_frames(clip_frames)
+            stitched = stitch_scrolling_frames(deduped)
+            text = call_glm_ocr(stitched, "Text Recognition:", max_tokens=1024)
+        except Exception:
+            mid = clip_frames[len(clip_frames) // 2]
+            text = call_glm_ocr(mid, "Text Recognition:", max_tokens=1024)
+        if text and len(text) > 20:
                 t = clip_idx * clip_secs
                 m, s = divmod(int(t), 60)
                 entry = {
@@ -397,7 +385,10 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
                         entry["transcript"] = e["text"]
                         break
                 terminal_outputs.append(entry)
-        c2.close()
+    # Free non-terminal frame data
+    for idx in list(clip_all_frames):
+        if idx not in terminal_clips and idx not in code_clips:
+            del clip_all_frames[idx]
     print(f"  terminal outputs: {len(terminal_outputs)}")
 
     # 9. Build structured output
