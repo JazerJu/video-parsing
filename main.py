@@ -357,10 +357,11 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
                     break
     print(f"  unique code snapshots: {len(code_snapshots)}")
 
-    # 8. Terminal outputs — 复用 Phase 1 全帧拼接后 GLM-OCR
+    # 8. Terminal outputs — 复用 Phase 1 全帧：去重→拼接→长图分块OCR
     print("\n提取终端输出...")
     terminal_outputs = []
     from frame_stitcher import deduplicate_frames, stitch_scrolling_frames
+    from external_api import ocr_long_image
     for clip_idx in sorted(terminal_clips.keys()):
         clip_frames = clip_all_frames.get(clip_idx, [])
         if not clip_frames:
@@ -368,23 +369,22 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
         try:
             deduped = deduplicate_frames(clip_frames)
             stitched = stitch_scrolling_frames(deduped)
-            text = call_glm_ocr(stitched, "Text Recognition:", max_tokens=1024)
+            text = ocr_long_image(stitched)
         except Exception:
-            mid = clip_frames[len(clip_frames) // 2]
-            text = call_glm_ocr(mid, "Text Recognition:", max_tokens=1024)
+            text = call_glm_ocr(clip_frames[len(clip_frames) // 2], "Text Recognition:", max_tokens=1024)
         if text and len(text) > 20:
-                t = clip_idx * clip_secs
-                m, s = divmod(int(t), 60)
-                entry = {
-                    "time": t,
-                    "time_str": f"{m:02d}:{s:02d}",
-                    "text": text,
-                }
-                for e in transcript:
-                    if e["start"] <= t <= e["end"]:
-                        entry["transcript"] = e["text"]
-                        break
-                terminal_outputs.append(entry)
+            t = clip_idx * clip_secs
+            m, s = divmod(int(t), 60)
+            entry = {
+                "time": t,
+                "time_str": f"{m:02d}:{s:02d}",
+                "text": text,
+            }
+            for e in transcript:
+                if e["start"] <= t <= e["end"]:
+                    entry["transcript"] = e["text"]
+                    break
+            terminal_outputs.append(entry)
     # Free non-terminal frame data
     for idx in list(clip_all_frames):
         if idx not in terminal_clips and idx not in code_clips:

@@ -1293,30 +1293,8 @@ class VideoAgent:
         return call_glm_ocr(image, prompt)
 
     def _chunked_ocr(self, image: PILImage.Image, max_chunk_height: int = 1800) -> str:
-        overlap = 50
-        if image.height <= max_chunk_height:
-            return call_glm_ocr(image, "Text Recognition:")
-
-        results = []
-        y = 0
-        while y < image.height:
-            bottom = min(y + max_chunk_height, image.height)
-            chunk = image.crop((0, y, image.width, bottom))
-            results.append(call_glm_ocr(chunk, "Text Recognition:"))
-            if bottom >= image.height:
-                break
-            y = max(bottom - overlap, y + 1)
-
-        if len(results) == 1:
-            return results[0]
-
-        merge_prompt = (
-            "以下是对同一段内容的多段 OCR 识别结果，内容有重叠。"
-            "请合并为一份完整、不重复的内容。\n\n"
-        )
-        for i, result in enumerate(results, 1):
-            merge_prompt += f"【第 {i} 段】\n{result}\n\n"
-        return call_deepseek(merge_prompt, max_tokens=4096)
+        from external_api import ocr_long_image
+        return ocr_long_image(image, max_chunk_height=max_chunk_height, prompt="Text Recognition:")
 
     def _stitch_frames(self, frames, pad=4):
         from frame_stitcher import deduplicate_frames, stitch_scrolling_frames

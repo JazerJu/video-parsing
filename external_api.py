@@ -430,3 +430,24 @@ def call_knowledge_llm(prompt: str, max_tokens: int = 4096) -> str:
     if r and len(r) > 50:
         return r
     return ""
+
+
+def ocr_long_image(image, max_chunk_height: int = 1800, overlap: int = 50,
+                   prompt: str = "Text Recognition:") -> str:
+    if image.height <= max_chunk_height:
+        return call_glm_ocr(image, prompt)
+    results = []
+    y = 0
+    while y < image.height:
+        bottom = min(y + max_chunk_height, image.height)
+        chunk = image.crop((0, y, image.width, bottom))
+        results.append(call_glm_ocr(chunk, prompt))
+        if bottom >= image.height:
+            break
+        y = max(bottom - overlap, y + 1)
+    if len(results) == 1:
+        return results[0]
+    merge_prompt = "以下是对同一段内容的多段 OCR 识别结果，内容有重叠。请合并为一份完整、不重复的内容。\n\n"
+    for i, r in enumerate(results, 1):
+        merge_prompt += f"【第 {i} 段】\n{r}\n\n"
+    return call_deepseek(merge_prompt, max_tokens=4096)
