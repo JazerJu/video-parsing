@@ -335,6 +335,7 @@ class VideoAgent:
         self._lang = lang or SUMMARY_LANG
         if self._lang != "中文":
             self._SYSTEM_PROMPT = self._SYSTEM_PROMPT.replace("用中文回答", f"用{self._lang}回答")
+            self._SYSTEM_PROMPT_NO_SRT = self._SYSTEM_PROMPT_NO_SRT.replace("用中文回答", f"用{self._lang}回答")
             self._SUMMARIZE_SYSTEM_PROMPT = self._SUMMARIZE_SYSTEM_PROMPT.replace("用中文输出（原始字幕/代码保持原文）", f"用{self._lang}输出（原始字幕/代码保持原文）")
         caps = [c["caption"] for c in db["clips"]]
         if caps:
@@ -1141,6 +1142,33 @@ class VideoAgent:
         "- 用中文回答"
     )
 
+    _SYSTEM_PROMPT_NO_SRT = (
+        "你是视频分析助手。当前视频没有字幕，所有信息必须从画面中提取。\n\n"
+        "可用工具：\n"
+        "1. search_similar_clips - 通过 caption embedding 语义搜索定位相关片段（首要定位手段）\n"
+        "2. inspect_scrolling - 密集抽帧拼接长图，GLM-OCR 精确识别画面中所有可见文本【核心工具】\n"
+        "3. visual_inspect - MiniCPM-V 8B 视觉描述（仅用于理解画面大意，不可信精确文本）\n"
+        "4. get_extracted_content - 获取已提取的 slides/code/terminal OCR 内容\n"
+        "5. identify_image - 云端 VLM 分析画面（识别物体/人物/Logo 等非文字内容）\n"
+        "6. inspect_slide - GLM-OCR 读取指定幻灯片图片\n"
+        "7. read_summary / update_summary - 读取/修改已生成的摘要\n\n"
+        "无字幕分析策略（严格按此顺序）：\n"
+        "1. 用 search_similar_clips 根据问题语义定位相关 clip 的时间范围\n"
+        "2. 对定位到的时间范围调用 inspect_scrolling 做精确 OCR（这是获取具体文本/数字/代码/命令的唯一可靠来源）\n"
+        "3. 只有在需要理解画面整体结构（如界面布局、操作流程）时才用 visual_inspect\n"
+        "4. 绝不要仅凭 caption 或 visual_inspect 的结果回答涉及具体文本/数字/命令的问题\n\n"
+        "工具可靠性排序（高→低）：\n"
+        "  inspect_scrolling (GLM-OCR 精确文本) > get_extracted_content (已提取OCR) "
+        "> identify_image (云端VLM) > visual_inspect (8B本地VLM, 可能幻觉) "
+        "> search_similar_clips (caption, 仅供参考定位)\n\n"
+        "caption 和 visual_inspect 可能产生幻觉（编造不存在的命令、数字、文件名），"
+        "涉及具体事实时必须用 inspect_scrolling 交叉验证。\n\n"
+        "重要：\n"
+        "- 当你已经有足够信息时，**立即停止调用工具并直接给出最终答案**\n"
+        "- 最终答案必须包含：具体事实 + 时间戳 + 来源（OCR/视觉）\n"
+        "- 用中文回答"
+    )
+
     _SUMMARIZE_SYSTEM_PROMPT = (
         "你是视频结构化总结助手。你的任务是为视频生成一份带章节结构的完整讲义。\n\n"
         "工作流程：\n"
@@ -1159,7 +1187,11 @@ class VideoAgent:
     )
 
     def reset_conversation(self):
-        self._messages = [{"role": "system", "content": self._SYSTEM_PROMPT}]
+        if not self.srt or len(self.srt) < 5:
+            prompt = self._SYSTEM_PROMPT_NO_SRT
+        else:
+            prompt = self._SYSTEM_PROMPT
+        self._messages = [{"role": "system", "content": prompt}]
 
     def ask(self, question, max_rounds=6):
         if not DEEPSEEK_API_KEY:
