@@ -6,8 +6,6 @@ import time
 import numpy as np
 from pathlib import Path
 
-import av
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import minicpmv_llama
 from preprocess import preprocess_frame, extract_frames
@@ -108,46 +106,58 @@ def build_database(video_path: str, srt_path: str, db_name: str = "default",
 
 
 def _get_duration(path: str) -> float:
-    c = av.open(path)
-    d = float(c.duration / av.time_base) if c.duration else 0.0
-    if d == 0.0:
-        stream = c.streams.video[0]
-        d = float(stream.duration * stream.time_base) if stream.duration else 0.0
-    c.close()
-    if d == 0.0:
-        import subprocess, json
-        r = subprocess.run(["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path], capture_output=True, text=True)
-        d = float(json.loads(r.stdout)["format"]["duration"])
-    return d
+    import subprocess, json
+    r = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path],
+        capture_output=True, text=True, check=True)
+    return float(json.loads(r.stdout)["format"]["duration"])
 
 
 def _extract_clip_frames(video_path: str, start: float, end: float,
                          video_fps: float = None, frames_per_clip: int = None) -> list:
+    import subprocess, os
+    from PIL import Image
     video_fps = video_fps or VIDEO_FPS
     frames_per_clip = frames_per_clip or FRAMES_PER_CLIP
-    c = av.open(video_path)
-    video_stream = c.streams.video[0]
-    fps = float(video_stream.average_rate) if video_stream.average_rate else 30.0
     clip_duration = end - start
-    min_raw = frames_per_clip + 2
-    interval = max(1, min(int(fps / video_fps), int(fps * clip_duration / min_raw)))
-    time_base = float(video_stream.time_base)
-    start_pts = int(start / time_base)
-    end_pts = int(end / time_base)
-    c.seek(start_pts, stream=video_stream)
-    frames, count = [], 0
-    for frame in c.decode(video_stream):
-        if frame.pts is not None and frame.pts > end_pts:
-            break
-        if count % interval == 0:
-            img = frame.to_image()
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            frames.append(img)
-            if len(frames) >= frames_per_clip * 3:
-                break
-        count += 1
-    c.close()
+
+    probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=codec_name,width,height", "-of", "csv=p=0", video_path],
+        capture_output=True, text=True, check=True)
+    codec, width, height = probe.stdout.strip().split(",")
+    width, height = int(width), int(height)
+
+    hwaccel = os.environ.get("VIDUNDER_HWACCEL", "none")
+    if hwaccel == "cuda":
+        hwaccel_args = ["-c:v", f"{codec}_cuvid"]
+    elif hwaccel == "vaapi":
+        hwaccel_args = ["-hwaccel", "vaapi"]
+    else:
+        hwaccel_args = []
+
+    cmd = ["ffmpeg", "-y"] + hwaccel_args + [
+        "-ss", str(start), "-t", str(clip_duration),
+        "-i", video_path,
+        "-vf", f"fps={video_fps}",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-v", "quiet", "-"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, check=True)
+    except subprocess.CalledProcessError:
+        cmd_fallback = ["ffmpeg", "-y",
+                        "-ss", str(start), "-t", str(clip_duration),
+                        "-i", video_path,
+                        "-vf", f"fps={video_fps}",
+                        "-f", "rawvideo", "-pix_fmt", "rgb24",
+                        "-v", "quiet", "-"]
+        proc = subprocess.run(cmd_fallback, capture_output=True, check=True)
+    raw = proc.stdout
+
+    frame_size = width * height * 3
+    frames = [Image.frombytes("RGB", (width, height), raw[i:i + frame_size])
+              for i in range(0, len(raw), frame_size)
+              if i + frame_size <= len(raw)]
     if len(frames) > frames_per_clip:
         indices = np.linspace(0, len(frames) - 1, frames_per_clip, dtype=int)
         frames = [frames[i] for i in indices]

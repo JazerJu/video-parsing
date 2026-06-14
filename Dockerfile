@@ -70,21 +70,27 @@ RUN pip install --no-cache-dir \
     onnxruntime-gpu>=1.17
 COPY --from=cuda-strip /cuda-libs/ /usr/local/cuda/lib64/
 ENV LD_LIBRARY_PATH=/app/bin:/usr/local/cuda/lib64
+ENV VIDUNDER_HWACCEL=cuda
 
 # ============================================================================
-# :cpu — CPU ONNX + Vulkan GGUF (fallback to CPU without GPU)
+# :cpu — CPU ONNX + Vulkan GGUF
 # ============================================================================
 FROM base AS cpu
 RUN pip install --no-cache-dir onnxruntime>=1.17
+ENV VIDUNDER_HWACCEL=vaapi
 
 # ============================================================================
-# :amd — CPU ONNX + Vulkan GGUF (MIGraphX EP requires source build)
+# :amd — ROCm ONNX + Vulkan GGUF
 # ============================================================================
 FROM base AS amd
-RUN pip install --no-cache-dir onnxruntime>=1.17
+RUN pip install --no-cache-dir \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple/ \
+    onnxruntime-rocm>=1.22
+ENV VIDUNDER_HWACCEL=vaapi
 
 # ============================================================================
 # :intel — OpenVINO ONNX + Vulkan GGUF
 # ============================================================================
 FROM base AS intel
 RUN pip install --no-cache-dir onnxruntime-openvino>=1.17
+ENV VIDUNDER_HWACCEL=vaapi
