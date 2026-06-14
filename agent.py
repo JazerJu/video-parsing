@@ -931,6 +931,68 @@ class VideoAgent:
             chapters[0]["start_seconds"] = 0
             chapters[0]["start_time"] = "00:00"
 
+        # Fallback: energy minima when embedding fails (≤2 chapters for >10min video)
+        duration = self.srt[-1]["end"] if self.srt else 0
+        if len(chapters) <= 2 and duration > 600:
+            import numpy as _np2
+            target = max(3, int(duration / 240) + 1)  # ~4min per chapter
+            # Take N-1 lowest-similarity points as boundaries, sorted by time
+            ranked = sorted(enumerate(sims), key=lambda x: x[1])
+            fallback = [0]
+            for idx, _ in ranked[:target - 1]:
+                if idx > 0:
+                    fallback.append(idx)
+            fallback.sort()
+            # Merge by min distance
+            merged_fb = [fallback[0]]
+            for idx in fallback[1:]:
+                last_t = times[merged_fb[-1]] if merged_fb[-1] < len(times) else 0
+                cur_t = times[idx] if idx < len(times) else 0
+                if cur_t - last_t >= min_chapter_secs:
+                    merged_fb.append(idx)
+            # Build chapters from fallback boundaries
+            chapters_fb = []
+            prev_time = 0
+            for j, b_idx in enumerate(merged_fb):
+                start_time = prev_time
+                next_idx = merged_fb[j + 1] if j + 1 < len(merged_fb) else len(times) - 1
+                end_time = times[next_idx] if next_idx < len(times) else self.srt[-1]["end"]
+                if end_time - start_time < min_chapter_secs:
+                    continue
+                chapters_fb.append({
+                    "chapter": len(chapters_fb) + 1,
+                    "title": f"分组 {len(chapters_fb) + 1}",
+                    "start_seconds": round(start_time, 1),
+                    "end_seconds": round(end_time, 1),
+                    "start_time": self._fmt(start_time),
+                    "end_time": self._fmt(end_time),
+                    "duration": round(end_time - start_time),
+                    "preview": " ".join(
+                        e["text"] for e in self.srt if start_time <= e["start"] <= end_time
+                    )[:300],
+                })
+                prev_time = end_time
+            if chapters_fb:
+                from external_api import call_doubao
+                outlines = "\n".join(
+                    f"{ch['chapter']}. ({ch['start_time']}-{ch['end_time']}) {ch.get('preview', '')[:200]}"
+                    for ch in chapters_fb
+                )
+                title_resp = call_doubao(
+                    f"为以下视频分组各生成一个简短标题（5-15字，不要序号和标点）。\n每行输出格式：序号. 标题\n\n{outlines}",
+                    max_tokens=500,
+                )
+                for line in title_resp.split("\n"):
+                    m2 = re.match(r'(\d+)[\.\)、]\s*(.+)', line.strip())
+                    if m2:
+                        idx2 = int(m2.group(1)) - 1
+                        if 0 <= idx2 < len(chapters_fb):
+                            chapters_fb[idx2]["title"] = m2.group(2).strip()
+                chapters_fb[0]["start_seconds"] = 0
+                chapters_fb[0]["start_time"] = "00:00"
+                chapters = chapters_fb
+                threshold = float(_np2.mean([s[1] for s in ranked[:target-1]]))
+
         return {
             "_source": f"detect_chapters (adaptive threshold={threshold:.3f}, mean_sim={mean_sim:.3f})",
             "total_chapters": len(chapters),
@@ -1064,8 +1126,8 @@ class VideoAgent:
         prompt = (
             f"请为视频章节「{chapter_title}」（{self._fmt(start_sec)}-{self._fmt(end_sec)}）生成详细的结构化摘要。\n\n"
             f"该章节字幕：\n{transcript}\n\n"
-            f"该章节画面描述（AI caption）：\n{caption_text}"
-            f"{ocr_code_section}{terminal_section}{slides_section}\n\n"
+            f"{terminal_section}{ocr_code_section}{slides_section}\n\n"
+            f"该章节画面描述（AI caption，仅供参考；优先采用上方 OCR 逐字抄录的终端/代码/幻灯片文字）：\n{caption_text}"
             f"要求：\n"
             f"- 严格按照时间顺序，逐段展开叙述，不要遗漏任何重要内容\n"
             f"- 每个知识点/操作步骤必须展开描述：先说明背景/目的，再写出具体内容（代码要完整写出，命令要写出完整命令行，配置要写出具体参数值）\n"
