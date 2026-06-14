@@ -355,28 +355,49 @@ def cmd_extract(video_path: str, srt_path: str | None = None,
                     break
     print(f"  unique code snapshots: {len(code_snapshots)}")
 
-    # 8. Terminal outputs
+    # 8. Terminal outputs — 拼接多帧后 GLM-OCR（需重开视频流取全帧）
     print("\n提取终端输出...")
     terminal_outputs = []
-    for clip_idx in sorted(terminal_clips.keys()):
-        frames = terminal_clips[clip_idx]
-        if not frames:
-            continue
-        mid = frames[len(frames) // 2]
-        text = call_glm_ocr(mid, "Text Recognition:", max_tokens=1024)
-        if text and len(text) > 20:
-            t = clip_idx * clip_secs
-            m, s = divmod(int(t), 60)
-            entry = {
-                "time": t,
-                "time_str": f"{m:02d}:{s:02d}",
-                "text": text,
-            }
-            for e in transcript:
-                if e["start"] <= t <= e["end"]:
-                    entry["transcript"] = e["text"]
+    if terminal_clips:
+        c2 = av.open(video_path)
+        stream2 = c2.streams.video[0]
+        time_base2 = float(stream2.time_base)
+        from frame_stitcher import deduplicate_frames, stitch_scrolling_frames
+        for clip_idx in sorted(terminal_clips.keys()):
+            start_sec = clip_idx * clip_secs
+            end_sec = start_sec + clip_secs
+            c2.seek(int(start_sec / time_base2), stream=stream2)
+            clip_frames = []
+            for frame in c2.decode(stream2):
+                pts = float(frame.pts * time_base2) if frame.pts is not None else 0
+                if pts > end_sec + 1:
                     break
-            terminal_outputs.append(entry)
+                clip_frames.append(frame.to_image().convert("RGB"))
+                if len(clip_frames) >= frames_per_clip:
+                    break
+            if not clip_frames:
+                continue
+            try:
+                deduped = deduplicate_frames(clip_frames)
+                stitched = stitch_scrolling_frames(deduped)
+                text = call_glm_ocr(stitched, "Text Recognition:", max_tokens=1024)
+            except Exception:
+                mid = clip_frames[len(clip_frames) // 2]
+                text = call_glm_ocr(mid, "Text Recognition:", max_tokens=1024)
+            if text and len(text) > 20:
+                t = clip_idx * clip_secs
+                m, s = divmod(int(t), 60)
+                entry = {
+                    "time": t,
+                    "time_str": f"{m:02d}:{s:02d}",
+                    "text": text,
+                }
+                for e in transcript:
+                    if e["start"] <= t <= e["end"]:
+                        entry["transcript"] = e["text"]
+                        break
+                terminal_outputs.append(entry)
+        c2.close()
     print(f"  terminal outputs: {len(terminal_outputs)}")
 
     # 9. Build structured output

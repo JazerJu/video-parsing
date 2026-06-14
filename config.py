@@ -3,7 +3,7 @@
 
 支持环境变量覆盖（Docker 热修改）：
   VIDUNDER_N_CTX          - KV cache 上下文长度，默认 4096
-  VIDUNDER_N_GPU_LAYERS   - MiniCPM-V GGUF 放 GPU 的层数，默认 36（0-36）
+  VIDUNDER_N_GPU_LAYERS   - MiniCPM-V GGUF 放 GPU 的层数，默认 99（全 offload 37 层）
   VIDUNDER_GLM_OCR_N_GPU_LAYERS - GLM-OCR GGUF 放 GPU 的层数，默认 17（0-17）
   VIDUNDER_KV_CACHE_TYPE  - KV cache 量化类型，默认 q4_0
   VIDUNDER_ONNX_PROVIDER  - ONNX 推理设备，默认 cuda，可改 cpu
@@ -77,12 +77,12 @@ MIMO_MODEL = "mimo-v2.5"
 
 # ── LLM 推理参数（环境变量可覆盖）─────────────────────────
 N_CTX = int(os.environ.get("VIDUNDER_N_CTX", "4096"))
-N_GPU_LAYERS = int(os.environ.get("VIDUNDER_N_GPU_LAYERS", "36"))
+N_GPU_LAYERS = int(os.environ.get("VIDUNDER_N_GPU_LAYERS", "99"))
 GLM_OCR_N_GPU_LAYERS = int(os.environ.get("VIDUNDER_GLM_OCR_N_GPU_LAYERS", "17"))
 N_BATCH = int(os.environ.get("VIDUNDER_N_BATCH", "512"))
 KV_CACHE_TYPE = os.environ.get("VIDUNDER_KV_CACHE_TYPE", "q4_0")
 ONNX_PROVIDER = os.environ.get("VIDUNDER_ONNX_PROVIDER", "cuda")
-N_PREDICT = 256
+N_PREDICT = 512
 SUMMARY_SLIDES_PER_CHAPTER = int(os.environ.get("VIDUNDER_SUMMARY_SLIDES_PER_CHAPTER", "3"))
 SUMMARY_LANG = os.environ.get("VIDUNDER_SUMMARY_LANG", "中文")
 
