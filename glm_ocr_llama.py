@@ -29,13 +29,12 @@ class GlmOcrLlama:
         if not gguf_path:
             raise ValueError("gguf_path is required (e.g. 'models/GLM-OCR-GGUF/GLM-OCR-Q8_0.gguf')")
         if onnx_dir is None:
-            onnx_dir = str(Path(__file__).resolve().parents[1] / "models" / "export")
-
-        self.onnx = GlmOcrOnnx(onnx_dir, max_tokens=2048)
+            onnx_dir = str(Path(__file__).resolve().parent / "models" / "export")
 
         self.model = LlamaModel(gguf_path, n_gpu_layers=n_gpu_layers)
         self.n_embd = self.model.n_embd
         self.ctx = LlamaContext(self.model, n_ctx=n_ctx, n_batch=n_ctx)
+        self.onnx = GlmOcrOnnx(onnx_dir, max_tokens=2048)
 
         with open(Path(onnx_dir) / "config.json") as f:
             cfg = json.load(f)
@@ -239,7 +238,7 @@ if __name__ == "__main__":
     from PIL import Image
 
     parser = argparse.ArgumentParser()
-    project_dir = Path(__file__).resolve().parents[1]
+    project_dir = Path(__file__).resolve().parent
     parser.add_argument("--image", default=str(project_dir / "tests" / "example.png"))
     parser.add_argument("--gguf", default=str(project_dir / "models" / "GLM-OCR-GGUF" / "GLM-OCR-Q8_0.gguf"))
     parser.add_argument("--onnx-dir", default=str(project_dir / "models" / "export"))

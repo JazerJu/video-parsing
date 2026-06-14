@@ -49,6 +49,11 @@ ln -sf libggml-cuda.so.0 libggml-cuda.so
 ln -sf libllama.so.0 libllama.so
 ```
 
+当前 Python ctypes 绑定已同步到 llama.cpp **b9409+** 的结构体布局。替换 `bin/`
+里的 `libllama.so` / `libggml*.so` 时，要同步确认 `minicpmv_llama.py` 和
+`llama_cpp_bindings.py` 里的 `llama_model_params` / `llama_context_params` 与
+对应 `llama.h` 一致；ABI 错位会导致随机初始化错误、生成异常或 C++ assert。
+
 ## Docker
 
 ### 构建
